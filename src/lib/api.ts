@@ -231,7 +231,14 @@ export async function resendDealTerms(
     p_new_down_payment: newDownPayment ?? null,
   });
   if (error) throw error;
-  return data as { buyer_token: string; action: 'reminder' | 'updated_terms' };
+  return data as {
+    buyer_token: string;
+    action: 'reminder' | 'updated_terms' | 'payment_applied';
+    total_price?: number;
+    total_paid?: number;
+    remaining_balance?: number;
+    amount_added?: number;
+  };
 }
 
 export async function nudgeBuyer(dealId: string) {

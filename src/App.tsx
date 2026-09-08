@@ -1781,7 +1781,8 @@ function ManagementPage({ role, onBack }: { role: string; onBack: () => void }) 
   const [modifyForm, setModifyForm] = useState({ total_price: '', items: '' });
   const [modifyItems, setModifyItems] = useState<{ category_name: string; quantity: string; unit: string }[]>([]);
   const [showUpdatedTerms, setShowUpdatedTerms] = useState<string | null>(null);
-  const [updatedTermsForm, setUpdatedTermsForm] = useState({ total_price: '', down_payment: '' });
+  const [updatedTermsForm, setUpdatedTermsForm] = useState({ down_payment: '' });
+  const [sendingUpdatedTerms, setSendingUpdatedTerms] = useState(false);
   const [nudging, setNudging] = useState<string | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
   const [categoryOptions, setCategoryOptions] = useState<Record<string, OptionGroup[]>>({});
@@ -1964,28 +1965,52 @@ function ManagementPage({ role, onBack }: { role: string; onBack: () => void }) 
     } catch (e: any) { setActionError(e.message); }
   };
 
-  const handleResendTerms = async (dealId: string, newTotal?: number, newDown?: number) => {
+  const handleResendTerms = async (dealId: string, downPayment?: number) => {
+    const deal = deals.find((d) => d.id === dealId);
+    const amount = downPayment ?? 0;
+    if (!deal) return;
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setActionError('Enter a down payment greater than 0.');
+      return;
+    }
+    if (amount > deal.remaining_balance) {
+      setActionError(`Down payment cannot exceed the remaining balance of ৳${fmt(deal.remaining_balance)}.`);
+      return;
+    }
+    setSendingUpdatedTerms(true);
+    setActionError('');
     try {
-      const result = await api.resendDealTerms(dealId, newTotal, newDown);
-      const deal = deals.find((d) => d.id === dealId);
+      const result = await api.resendDealTerms(dealId, deal.total_price, amount);
       const order = orders.find((o) => o.id === deal?.order_id);
       if (result.buyer_token && order?.buyer_email) {
         const dealUrl = `${window.location.origin}/#deal/${result.buyer_token}`;
-        const isUpdate = result.action === 'updated_terms';
-        api.sendNotificationEmail(
-          order.buyer_email,
-          isUpdate ? 'Updated deal terms for your review' : 'Reminder: your deal terms are waiting',
-          isUpdate
-            ? `We've updated your deal terms.\n\n• New total price: ৳${newTotal}\n• Down payment: ৳${newDown}\n\nPlease review and accept or reject using the button below.`
-            : `This is a friendly reminder to review your deal terms.\n\n• Total price: ৳${deal?.total_price}\n• Down payment: ৳${deal?.down_payment}\n\nPlease accept or reject using the button below.`,
-          dealUrl,
-          isUpdate ? 'Review updated terms' : 'Review deal terms',
-        ).catch(() => {});
+        if (result.action === 'payment_applied') {
+          api.sendNotificationEmail(
+            order.buyer_email,
+            'Down payment recorded on your order',
+            `A down payment has been added to your account. No action is needed from you.\n\n• Amount added: ৳${amount}\n• Total price: ৳${result.total_price}\n• Paid so far: ৳${result.total_paid}\n• Remaining: ৳${result.remaining_balance}`,
+            dealUrl,
+            'View order',
+          ).catch(() => {});
+        } else {
+          api.sendNotificationEmail(
+            order.buyer_email,
+            'Reminder: your deal terms are waiting',
+            `This is a friendly reminder to review your deal terms.\n\n• Total price: ৳${deal?.total_price}\n• Down payment: ৳${deal?.down_payment}\n\nPlease accept or reject using the button below.`,
+            dealUrl,
+            'Review deal terms',
+          ).catch(() => {});
+        }
       }
-      setShowUpdatedTerms(null); setUpdatedTermsForm({ total_price: '', down_payment: '' });
-      setActionMsg(result.action === 'updated_terms' ? 'Updated terms sent to buyer by email.' : 'Reminder sent to buyer by email.');
+      setShowUpdatedTerms(null); setUpdatedTermsForm({ down_payment: '' });
+      setActionMsg(
+        result.action === 'payment_applied'
+          ? `Down payment of ৳${fmt(amount)} applied. Paid ৳${fmt(result.total_paid ?? 0)}. Remaining ৳${fmt(result.remaining_balance ?? 0)}.`
+          : 'Reminder sent to buyer by email.',
+      );
       load();
     } catch (e: any) { setActionError(e.message); }
+    setSendingUpdatedTerms(false);
   };
 
   const handleNudge = async (dealId: string) => {
@@ -2163,7 +2188,7 @@ function ManagementPage({ role, onBack }: { role: string; onBack: () => void }) 
                         </>}
                         {d.status === 'buyer_accepted' && <>
                           <span className="muted-small">Buyer accepted</span>
-                          <button className="button button-dark" onClick={() => { setShowUpdatedTerms(d.id); setUpdatedTermsForm({ total_price: String(d.total_price), down_payment: String(d.down_payment) }); }}><Send size={14} /> Send updated terms</button>
+                          <button className="button button-dark" onClick={() => { setShowUpdatedTerms(d.id); setUpdatedTermsForm({ down_payment: '' }); }}><Send size={14} /> Send updated terms</button>
                           <button className="button button-outline" onClick={() => { setShowModify(d.id); setModifyItems(orderItems[d.order_id]?.map((it: any) => ({ category_name: it.category_name, quantity: String(it.quantity), unit: it.unit })) ?? [{ category_name: '', quantity: '', unit: '' }]); setModifyForm({ total_price: String(d.total_price), items: '' }); }}><PackagePlus size={14} /> Add products</button>
                           <button className="button button-outline" onClick={() => handleNudge(d.id)} disabled={nudging === d.id}><Bell size={14} /> {nudging === d.id ? 'Sending...' : 'Remind'}</button>
                         </>}
@@ -2196,19 +2221,34 @@ function ManagementPage({ role, onBack }: { role: string; onBack: () => void }) 
                       {showUpdatedTerms === d.id && (
                         <div className="inline-form inline-form-enhanced">
                           <div className="form-eyebrow"><Send size={13} /> Send updated terms</div>
-                          <p className="form-hint">The buyer already accepted your initial terms. Set the new total price and down payment — the buyer will receive an email to review and accept the updated offer.</p>
+                          <p className="form-hint">Total price is fixed. Enter a down payment to add to the buyer&apos;s account. Remaining balance updates immediately — the buyer does not need to confirm.</p>
                           <div className="form-grid-2">
                             <div className="form-field">
-                              <label>New total price (৳)</label>
-                              <input type="number" placeholder="e.g. 85000" value={updatedTermsForm.total_price} onChange={(e) => setUpdatedTermsForm({ ...updatedTermsForm, total_price: e.target.value })} />
+                              <label>Total price (৳)</label>
+                              <div className="form-readonly">৳{fmt(d.total_price)}</div>
                             </div>
                             <div className="form-field">
-                              <label>New down payment (৳)</label>
-                              <input type="number" placeholder="e.g. 20000" value={updatedTermsForm.down_payment} onChange={(e) => setUpdatedTermsForm({ ...updatedTermsForm, down_payment: e.target.value })} />
+                              <label>Remaining to pay (৳)</label>
+                              <div className="form-readonly">৳{fmt(d.remaining_balance)}</div>
+                            </div>
+                            <div className="form-field">
+                              <label>Paid so far (৳)</label>
+                              <div className="form-readonly">৳{fmt(d.total_paid)}</div>
+                            </div>
+                            <div className="form-field">
+                              <label>Down payment to add (৳)</label>
+                              <input type="number" min="0" step="any" placeholder="e.g. 4" value={updatedTermsForm.down_payment} onChange={(e) => setUpdatedTermsForm({ down_payment: e.target.value })} />
                             </div>
                           </div>
+                          {(() => {
+                            const addAmt = parseFloat(updatedTermsForm.down_payment);
+                            if (!Number.isFinite(addAmt) || addAmt <= 0) return null;
+                            const nextRemaining = d.remaining_balance - addAmt;
+                            if (nextRemaining < 0) return <p className="form-error">Down payment cannot exceed remaining ৳{fmt(d.remaining_balance)}.</p>;
+                            return <p className="form-preview-line">After this payment: paid ৳{fmt(d.total_paid + addAmt)} · remaining <strong>৳{fmt(nextRemaining)}</strong></p>;
+                          })()}
                           <div className="form-buttons-row">
-                            <button className="button button-dark" onClick={() => handleResendTerms(d.id, parseFloat(updatedTermsForm.total_price), parseFloat(updatedTermsForm.down_payment))}><Send size={14} /> Send updated terms</button>
+                            <button className="button button-dark" disabled={sendingUpdatedTerms} onClick={() => handleResendTerms(d.id, parseFloat(updatedTermsForm.down_payment))}><Send size={14} /> {sendingUpdatedTerms ? 'Applying...' : 'Send updated terms'}</button>
                             <button className="button button-outline" onClick={() => setShowUpdatedTerms(null)}>Cancel</button>
                           </div>
                         </div>
