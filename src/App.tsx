@@ -1788,7 +1788,7 @@ function ManagementPage({ role, onBack }: { role: string; onBack: () => void }) 
   const [categoryOptions, setCategoryOptions] = useState<Record<string, OptionGroup[]>>({});
   const [actionMsg, setActionMsg] = useState('');
   const [pickupOrder, setPickupOrder] = useState<any | null>(null);
-  const [confirmAction, setConfirmAction] = useState<{ type: 'pickup' | 'accept' | 'reject'; orderId: string } | null>(null);
+  const [confirmAction, setConfirmAction] = useState<{ type: 'pickup' | 'accept' | 'reject' | 'delete-deal'; orderId: string; dealId?: string } | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const copiedPhone = copiedField === 'phone';
 
@@ -1863,6 +1863,15 @@ function ManagementPage({ role, onBack }: { role: string; onBack: () => void }) 
       }
       setActionMsg('Order accepted. Set deal terms now.');
       setConfirmAction(null); setPickupOrder(null); load();
+    } catch (e: any) { setActionError(e.message); }
+  };
+
+  const handleDeleteOngoing = async (dealId: string) => {
+    try {
+      await api.deleteOngoingDeal(dealId);
+      setActionMsg('Ongoing deal deleted.');
+      setConfirmAction(null);
+      load();
     } catch (e: any) { setActionError(e.message); }
   };
 
@@ -2196,6 +2205,7 @@ function ManagementPage({ role, onBack }: { role: string; onBack: () => void }) 
                           <button className="button button-dark" onClick={() => { setShowPayment(d.id); setPaymentForm({ amount: '', photo_url: '', note: '' }); }}><TrendingUp size={14} /> Record payment</button>
                           <button className="button button-outline" onClick={() => { setShowModify(d.id); setModifyItems(orderItems[d.order_id]?.map((it: any) => ({ category_name: it.category_name, quantity: String(it.quantity), unit: it.unit })) ?? [{ category_name: '', quantity: '', unit: '' }]); setModifyForm({ total_price: String(d.total_price), items: '' }); }}><PackagePlus size={14} /> Add products</button>
                         </>}
+                        <button className="button button-outline" onClick={() => setConfirmAction({ type: 'delete-deal', orderId: d.order_id, dealId: d.id })}><Trash2 size={14} /> Delete</button>
                       </div>
                       {showDealTerms === d.id && (
                         <div className="inline-form">
@@ -2395,8 +2405,10 @@ function ManagementPage({ role, onBack }: { role: string; onBack: () => void }) 
           {confirmAction && (
             <div className="crop-modal-overlay" onClick={() => setConfirmAction(null)}>
               <div className="confirm-dialog" onClick={(e) => e.stopPropagation()}>
-                <h3>{confirmAction.type === 'accept' ? 'Accept this order?' : confirmAction.type === 'reject' ? 'Reject this order?' : 'Pick up this order?'}</h3>
-                <p>{confirmAction.type === 'accept'
+                <h3>{confirmAction.type === 'delete-deal' ? 'Delete this ongoing deal?' : confirmAction.type === 'accept' ? 'Accept this order?' : confirmAction.type === 'reject' ? 'Reject this order?' : 'Pick up this order?'}</h3>
+                <p>{confirmAction.type === 'delete-deal'
+                  ? 'This will remove the deal from Ongoing. This cannot be undone.'
+                  : confirmAction.type === 'accept'
                   ? 'The customer will be notified by email and you can set deal terms next.'
                   : confirmAction.type === 'reject'
                   ? 'The customer will be notified by email that their order was rejected. This cannot be undone.'
@@ -2405,12 +2417,13 @@ function ManagementPage({ role, onBack }: { role: string; onBack: () => void }) 
                   <button
                     className={confirmAction.type === 'accept' || confirmAction.type === 'pickup' ? 'button button-dark' : 'button button-outline'}
                     onClick={() => {
-                      if (confirmAction.type === 'accept') handleAccept(confirmAction.orderId);
+                      if (confirmAction.type === 'delete-deal' && confirmAction.dealId) handleDeleteOngoing(confirmAction.dealId);
+                      else if (confirmAction.type === 'accept') handleAccept(confirmAction.orderId);
                       else if (confirmAction.type === 'reject') handleReject(confirmAction.orderId);
-                      else handlePickUp(confirmAction.orderId);
+                      else if (confirmAction.type === 'pickup') handlePickUp(confirmAction.orderId);
                     }}
                   >
-                    {confirmAction.type === 'accept' ? 'Yes, accept' : confirmAction.type === 'reject' ? 'Yes, reject' : 'Yes, pick up'}
+                    {confirmAction.type === 'delete-deal' ? 'Yes, delete' : confirmAction.type === 'accept' ? 'Yes, accept' : confirmAction.type === 'reject' ? 'Yes, reject' : 'Yes, pick up'}
                   </button>
                   <button className="button button-outline" onClick={() => setConfirmAction(null)}>Cancel</button>
                 </div>

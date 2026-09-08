@@ -190,6 +190,11 @@ export async function rejectOrder(orderId: string) {
   if (error) throw error;
 }
 
+export async function deleteOngoingDeal(dealId: string) {
+  const { error } = await supabase.rpc('delete_ongoing_deal', { p_deal_id: dealId });
+  if (error) throw error;
+}
+
 export async function setDealTerms(dealId: string, totalPrice: number, downPayment: number) {
   const { error } = await supabase.rpc('set_deal_terms', {
     p_deal_id: dealId,
